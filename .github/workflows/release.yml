@@ -1,0 +1,41 @@
+name: Release
+
+# Publishing is tag-driven: bump package.json, tag (git tag v0.3.0 && git push --tags),
+# and this workflow tests + publishes to npm. Requires an NPM_TOKEN repo secret
+# (automation token) — set it under Settings → Secrets and variables → Actions.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Test before publishing
+        run: |
+          npm run lint
+          npm test
+          npm run smoke
+
+      - name: Publish to npm
+        run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,5 +1,5 @@
 /**
- * Benchmark logic. Every metric is measured with plain HTTP GETs:
+ * Benchmark logic. Every metric is measured with real HTTP requests:
  *
  *   - TTFB  = time from request start until response headers arrive.
  *   - total = time until the response body has fully arrived.
@@ -9,58 +9,51 @@
  * first request of a run (see README → Limitations).
  */
 
-const USER_AGENT = "host-bench/0.1.0";
+import { createRequire } from "node:module";
+import { mean, percentile, round1 } from "./stats.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
+const USER_AGENT = `host-bench/${pkg.version}`;
 
 export async function benchmarkSite(site, { runs, timeoutMs }, log) {
-  const result = {
-    name: site.name,
-    baseUrl: site.baseUrl,
-    coldStart: null,
-    page: null,
-    api: null,
-    db: null,
-  };
+  const result = { name: site.name, baseUrl: site.baseUrl, coldStart: null, endpoints: {} };
 
-  // Cold-start probe. Also doubles as warm-up, so the series below measure
-  // warm performance.
-  const pageUrl = site.baseUrl + site.endpoints.page;
-  const probe = await timedFetch(pageUrl, timeoutMs);
+  // Cold-start probe on the page route. Doubles as warm-up, so the series
+  // below measure warm performance.
+  const page = site.endpoints.page ?? { path: "/", method: "GET", headers: {}, body: null };
+  const pageUrl = site.baseUrl + page.path;
+  const probe = await timedFetch(pageUrl, buildRequest(site, page), timeoutMs);
   if (probe.ok) {
     result.coldStart = {
       url: pageUrl,
+      method: page.method,
       status: probe.status,
       ttfbMs: round1(probe.ttfbMs),
       totalMs: round1(probe.totalMs),
     };
-    log(fmtLine("cold", site.endpoints.page, `TTFB ${Math.round(probe.ttfbMs)} ms (status ${probe.status})`));
+    log(fmtLine("cold", target(page), `TTFB ${Math.round(probe.ttfbMs)} ms (status ${probe.status})`));
   } else {
-    result.coldStart = { url: pageUrl, error: probe.error };
-    log(fmtLine("cold", site.endpoints.page, `error — ${probe.error}`));
+    result.coldStart = { url: pageUrl, method: page.method, error: probe.error };
+    log(fmtLine("cold", target(page), `error — ${probe.error}`));
   }
 
-  result.page = await runSeries("page", pageUrl, runs, timeoutMs, log);
-
-  if (site.endpoints.api) {
-    result.api = await runSeries("api", site.baseUrl + site.endpoints.api, runs, timeoutMs, log);
-  } else {
-    log(fmtLine("api", null, "skipped — not configured"));
-  }
-  if (site.endpoints.db) {
-    result.db = await runSeries("db", site.baseUrl + site.endpoints.db, runs, timeoutMs, log);
-  } else {
-    log(fmtLine("db", null, "skipped — not configured"));
+  for (const [key, endpoint] of Object.entries(site.endpoints)) {
+    result.endpoints[key] = await runSeries(key, site, endpoint, runs, timeoutMs, log);
   }
 
   return result;
 }
 
-async function runSeries(label, url, runs, timeoutMs, log) {
+async function runSeries(key, site, endpoint, runs, timeoutMs, log) {
+  const url = site.baseUrl + endpoint.path;
+  const request = buildRequest(site, endpoint);
   const totals = [];
   const ttfbs = [];
   const errors = [];
 
   for (let i = 0; i < runs; i++) {
-    const r = await timedFetch(url, timeoutMs);
+    const r = await timedFetch(url, request, timeoutMs);
     if (r.ok) {
       totals.push(r.totalMs);
       ttfbs.push(r.ttfbMs);
@@ -71,43 +64,58 @@ async function runSeries(label, url, runs, timeoutMs, log) {
 
   const series = {
     url,
+    method: request.method,
     requests: runs,
     successes: totals.length,
     errors: errors.length,
-    avgMs: null,
-    minMs: null,
-    maxMs: null,
-    avgTtfbMs: null,
+    avgMs: totals.length ? round1(mean(totals)) : null,
+    minMs: totals.length ? round1(Math.min(...totals)) : null,
+    maxMs: totals.length ? round1(Math.max(...totals)) : null,
+    p95Ms: totals.length ? round1(percentile(totals, 95)) : null,
+    avgTtfbMs: ttfbs.length ? round1(mean(ttfbs)) : null,
     lastError: errors.length ? errors[errors.length - 1] : null,
   };
 
   if (totals.length > 0) {
-    series.avgMs = round1(mean(totals));
-    series.minMs = round1(Math.min(...totals));
-    series.maxMs = round1(Math.max(...totals));
-    series.avgTtfbMs = round1(mean(ttfbs));
     log(
       fmtLine(
-        label,
-        new URL(url).pathname,
+        key,
+        target(endpoint),
         `avg ${Math.round(series.avgMs)} ms · min ${Math.round(series.minMs)} · max ${Math.round(
           series.maxMs
-        )} · ${totals.length}/${runs} ok`
+        )} · p95 ${Math.round(series.p95Ms)} · ${totals.length}/${runs} ok`
       )
     );
   } else {
-    log(fmtLine(label, new URL(url).pathname, `error — ${errors[0] ?? "all requests failed"}`));
+    log(fmtLine(key, target(endpoint), `error — ${errors[0] ?? "all requests failed"}`));
   }
 
   return series;
 }
 
-async function timedFetch(url, timeoutMs) {
+// Merges site-level headers with per-endpoint headers and applies JSON defaults.
+function buildRequest(site, endpoint) {
+  const method = endpoint.method || "GET";
+  const headers = { ...site.headers, ...endpoint.headers, "user-agent": USER_AGENT };
+  // Config normalization already stringifies object bodies, but stringify here
+  // too so benchmarkSite stays correct for any caller.
+  const body =
+    endpoint.body == null ? null : typeof endpoint.body === "string" ? endpoint.body : JSON.stringify(endpoint.body);
+  const hasBody = body != null && method !== "GET" && method !== "HEAD";
+  if (hasBody && !Object.keys(headers).some((k) => k.toLowerCase() === "content-type")) {
+    headers["content-type"] = "application/json";
+  }
+  return { method, headers, body: hasBody ? body : undefined };
+}
+
+async function timedFetch(url, request, timeoutMs) {
   const start = performance.now();
   try {
     const res = await fetch(url, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
       redirect: "follow",
-      headers: { "user-agent": USER_AGENT },
       signal: AbortSignal.timeout(timeoutMs),
     });
     const ttfbMs = performance.now() - start;
@@ -133,10 +141,11 @@ async function timedFetch(url, timeoutMs) {
   }
 }
 
-const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
-const round1 = (n) => Math.round(n * 10) / 10;
+function target(endpoint) {
+  const path = endpoint.path ?? "(unknown)";
+  return endpoint.method && endpoint.method !== "GET" ? `${endpoint.method} ${path}` : path;
+}
 
-function fmtLine(label, path, message) {
-  const target = path == null ? "" : ` ${path}`;
-  return `  ${label.padEnd(4)}${target} — ${message}`;
+function fmtLine(label, targetPath, message) {
+  return `  ${label.padEnd(4)} ${targetPath} — ${message}`;
 }

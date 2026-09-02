@@ -16,7 +16,12 @@
       "endpoints": {
         "page": "/",
         "api": "/api/health",
-        "db": "/api/items"
+        "db": "/api/items",
+        "contact": {
+          "path": "/api/contact",
+          "method": "POST",
+          "body": { "name": "host-bench", "message": "health check" }
+        }
       }
     },
     {
