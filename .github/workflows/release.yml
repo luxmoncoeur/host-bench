@@ -31,11 +31,22 @@ jobs:
           npm run smoke
 
       - name: Publish to npm
-        run: npm publish --provenance
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN secret is not configured — skipping npm publish."
+            echo "Set Settings → Secrets and variables → Actions → NPM_TOKEN to enable publishing."
+          else
+            npm publish --provenance
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists (created via the web UI)."
+          else
+            gh release create "$GITHUB_REF_NAME" --generate-notes
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
