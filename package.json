@@ -1,0 +1,35 @@
+{
+  "name": "host-bench",
+  "version": "0.2.0",
+  "description": "CLI to benchmark hosting providers (Vercel, Railway, Render, Fly.io) for a dynamic site's performance.",
+  "type": "module",
+  "bin": {
+    "host-bench": "bin/host-bench.js"
+  },
+  "scripts": {
+    "host-bench": "node bin/host-bench.js",
+    "bench": "node bin/host-bench.js run"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "benchmark",
+    "hosting",
+    "vercel",
+    "railway",
+    "render",
+    "fly-io",
+    "performance",
+    "cli"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^15.0.0"
+  }
+}

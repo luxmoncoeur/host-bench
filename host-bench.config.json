@@ -1,0 +1,30 @@
+{
+  "runs": 5,
+  "timeoutMs": 10000,
+  "sites": [
+    {
+      "name": "vercel",
+      "baseUrl": "https://my-app.vercel.app",
+      "endpoints": {
+        "page": "/",
+        "api": "/api/health"
+      }
+    },
+    {
+      "name": "railway",
+      "baseUrl": "https://my-app-production.up.railway.app",
+      "endpoints": {
+        "page": "/",
+        "api": "/api/health",
+        "db": "/api/items"
+      }
+    },
+    {
+      "name": "render",
+      "baseUrl": "https://my-app.onrender.com",
+      "endpoints": {
+        "page": "/"
+      }
+    }
+  ]
+}
