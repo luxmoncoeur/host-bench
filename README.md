@@ -8,7 +8,7 @@ Requires **Node.js 18+** (uses the built-in `fetch`).
 
 ---
 
-## Demo — 30 seconds
+## Demo
 
 ```bash
 # 1. No install, no config: benchmark any URL one-off
