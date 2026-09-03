@@ -1,5 +1,7 @@
 # host-bench
 
+[![CI](https://github.com/luxmoncoeur/host-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/luxmoncoeur/host-bench/actions/workflows/ci.yml)
+
 A small CLI that benchmarks hosting providers (Vercel, Railway, Render, Fly.io) for a **dynamic site's** performance, so you can compare how the same app behaves on different hosts — with numbers, not opinions.
 
 It hits your deployed site's pages, API routes, and DB-backed routes with real HTTP requests, prints a comparison table (avg / min / max / p95), and saves every run as timestamped JSON so you can track performance over time.
@@ -120,6 +122,9 @@ host-bench run [options]
   -c, --config <path>   path to the config file (default: host-bench.config.json)
   -n, --runs <count>    requests per endpoint (default: 5)
   -t, --timeout <ms>    per-request timeout in ms (default: 10000)
+  --warmup <count>      extra unmeasured requests per endpoint (default: 0)
+  --delay <ms>          delay between requests in ms (default: 0)
+  --fail-over <ms>      performance gate: exit code 2 if any endpoint avg exceeds it
   -o, --out <dir>       directory for result JSON files (default: results)
   --json                print results as JSON to stdout instead of a table
   --no-save             print the table but don't write a results file
@@ -128,6 +133,12 @@ host-bench compare [options]
 
   -d, --dir <path>      results directory to read (default: results)
   -l, --last <count>    only compare the N most recent runs (default: 5)
+  -f, --format <type>   output format: table or markdown (paste-ready)
+
+host-bench show [file] [options]
+
+  [file]                result file name, or "latest" (default)
+  -d, --dir <path>      results directory to read (default: results)
 ```
 
 Notes:
@@ -196,8 +207,10 @@ Endpoints aren't limited to GET: each one can send a custom method, headers, and
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `runs` | `5` | How many times each endpoint is requested. |
+| `runs` | `5` | How many times each endpoint is requested (measured). |
 | `timeoutMs` | `10000` | Per-request timeout. |
+| `warmup` | `0` | Extra unmeasured requests per endpoint, discarded before counting. |
+| `delayMs` | `0` | Pause between requests, for more realistic pacing. |
 | `sites` | required | One entry per deployment to benchmark. |
 
 ### Per-site keys
@@ -214,10 +227,11 @@ Endpoints aren't limited to GET: each one can send a custom method, headers, and
 An endpoint value is either:
 
 - **a path string** (GET request): `"api": "/api/health"`, or
-- **an object with request options**: `{ "path": "/api/contact", "method": "POST", "headers": {...}, "body": {...} }`
+- **an object with request options**: `{ "path": "/api/contact", "method": "POST", "headers": {...}, "body": {...}, "expect": { "status": 200 } }`
   - `method` — any HTTP verb, defaults to `GET`
   - `headers` — merged over the site-level headers
   - `body` — a JSON value (stringified automatically, with `content-type: application/json` applied unless you set your own) or a pre-encoded string
+  - `expect` — optional status assertion (`200` shorthand or `{ "status": 200 }`); responses with a different status count as errors, which turns host-bench into a health check
 
 **Any number of endpoints with any names is allowed** — each key becomes its own row in the table and its own series in the JSON.
 
@@ -225,16 +239,43 @@ An endpoint value is either:
 
 ## Tracking results over time
 
-Each `run` writes `results/host-bench-<timestamp>.json` containing the tool version, timestamp, the config used, the run settings, and per-endpoint series: `avgMs`, `minMs`, `maxMs`, `p95Ms`, `avgTtfbMs`, success/error counts, URLs, methods, and the last error if any. One file per run, human-readable, diff-friendly.
+Each `run` writes `results/host-bench-<timestamp>.json` containing the tool version, timestamp, the config used, the run settings (runs / timeout / warmup / delay), an optional `gate` verdict, and per-endpoint series: `avgMs`, `minMs`, `maxMs`, `p50Ms`, `p95Ms`, `p99Ms`, `avgTtfbMs`, `avgBytes`, connection stats (`avgConnectMs`, `newConnections`, `reusedRequests`), a `statuses` histogram (e.g. `{"200": 5}`), success/error counts, URLs, methods, and the last error if any. One file per run, human-readable, diff-friendly.
 
-`host-bench compare` aggregates those files: per site/metric it shows how many runs saw it, the first and latest average, the change between them (ms and %), and the best min seen. It reads both the current and the pre-0.3.0 result format, and it's the text-mode predecessor to a dashboard — the JSON files are the data layer a dashboard would use.
+`host-bench compare` aggregates those files: per site/metric it shows how many runs saw it, the first and latest average, the change between them (ms and %), and the best min seen. With `--format markdown` it prints a GitHub-flavored table you can paste straight into a README or issue. It reads both the current and the pre-0.3.0 result format, and it's the text-mode predecessor to a dashboard — the JSON files are the data layer a dashboard would use.
+
+`host-bench show` re-displays any saved run (or `latest`) without re-benchmarking:
+
+```bash
+host-bench show                    # latest run in results/
+host-bench show host-bench-2026-09-02T18-04-43-531Z.json
+```
+
+## Use in your own CI
+
+`host-bench` doubles as a performance gate. `--fail-over <ms>` exits with code **2** when any endpoint's average exceeds the budget (or when an endpoint fails entirely), which makes regressions visible right in your build:
+
+```bash
+host-bench run --url https://my-site.vercel.app --fail-over 300 --no-save
+```
+
+Or use the composite GitHub Action shipped in this repo (`action.yml`) in another repository's workflow:
+
+```yaml
+- name: Performance check
+  uses: luxmoncoeur/host-bench@main
+  with:
+    url: https://my-site.vercel.app
+    runs: 10
+    fail-over: 300
+```
 
 ## How it works
 
-- **TTFB vs total** — every request records two timings: TTFB (request sent → response headers arrive) and total (→ body fully drained). The table and the `avgMs`/`minMs`/`maxMs`/`p95Ms` fields are **total** response times; `avgTtfbMs` is stored alongside.
-- **Cold start** — the very first request of a run is measured separately as the cold probe. Providers don't expose "is my instance asleep?" over HTTP, so this is a *best-effort estimate*: if the host never spun your app down, it's just a warm request. The probe doubles as warm-up, so the endpoint series always measure warm performance. For a realistic cold-start reading, wait out your platform's idle timeout (often 10–15 min) first.
-- **p95** — computed with the nearest-rank method on the N total-time samples (with 5 runs, p95 ≈ the max; with 20 runs it's the 19th fastest).
-- **Sequential, not concurrent** — endpoints are hit one request at a time to keep load light on the target. This measures latency, not capacity — it is not a load test.
+- **TTFB vs total** — every request records two timings: TTFB (request sent → response headers arrive) and total (→ body fully drained). The table and the `avgMs`/`minMs`/`maxMs`/`p50Ms`/`p95Ms`/`p99Ms` fields are **total** response times; `avgTtfbMs` is stored alongside.
+- **Connection attribution** — host-bench taps undici's diagnostics channels to tell a **new connection** (DNS + TCP + TLS, reported as `avgConnectMs`) from a **reused** one (`reusedRequests`). Requests run sequentially, so attribution is exact; the first request in a run typically pays the connection cost and the rest reuse the socket.
+- **Cold start** — the very first request of a run is measured separately as the cold probe. Providers don't expose "is my instance asleep?" over HTTP, so this is a *best-effort estimate*: if the host never spun your app down, it's just a warm request. The probe doubles as warm-up, and the `warmup` option adds more unmeasured requests per endpoint. For a realistic cold-start reading, wait out your platform's idle timeout (often 10–15 min) first.
+- **p50/p95/p99** — computed with the nearest-rank method on the N total-time samples (with 5 runs, p95 ≈ the max; with 20 runs it's the 19th fastest).
+- **Sequential, not concurrent** — endpoints are hit one request at a time (optionally spaced with `delayMs`) to keep load light on the target. This measures latency, not capacity — it is not a load test.
 - **Client-side timing** — all numbers include your network. Compare hosts only from the same machine/network, and treat localhost numbers as a no-network baseline for your app itself, not a comparison point.
 
 ## Limitations
@@ -267,9 +308,11 @@ src/benchmark.js      HTTP timing logic (method/headers/body, cold probe, series
 src/stats.js          mean / nearest-rank percentile helpers
 src/report.js         table rendering + timestamped JSON output
 src/compare.js        `compare` command (trend across saved runs)
-src/run.js            `run` command wiring
+src/show.js           `show` command (re-display a saved run)
+src/run.js            `run` command wiring + performance gate
 scripts/smoke.mjs     end-to-end smoke test used by CI
 tests/                unit + integration tests (node:test)
+action.yml            composite GitHub Action for other repos' workflows
 host-bench.config.json
 results/              timestamped run output (gitignored)
 ```

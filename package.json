@@ -1,6 +1,6 @@
 {
   "name": "host-bench",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "CLI to benchmark hosting providers (Vercel, Railway, Render, Fly.io) for a dynamic site's performance.",
   "type": "module",
   "bin": {

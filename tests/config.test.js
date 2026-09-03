@@ -21,7 +21,7 @@ test("minimal config gets defaults and a default page endpoint", async () => {
     const config = await loadConfig(file);
     assert.equal(config.runs, 5);
     assert.equal(config.timeoutMs, 10000);
-    assert.deepEqual(config.sites[0].endpoints.page, { path: "/", method: "GET", headers: {}, body: null });
+    assert.deepEqual(config.sites[0].endpoints.page, { path: "/", method: "GET", headers: {}, body: null, expect: null });
   });
 });
 
@@ -61,10 +61,62 @@ test("endpoints accept strings, extra named keys, and request-option objects", a
 
 test("CLI overrides win over config values", async () => {
   await withConfig({ runs: 9, sites: [{ name: "x", baseUrl: "https://x.example" }] }, async (file) => {
-    const config = await loadConfig(file, { runs: 2, timeoutMs: 1500 });
+    const config = await loadConfig(file, { runs: 2, timeoutMs: 1500, warmup: 3, delayMs: 250 });
     assert.equal(config.runs, 2);
     assert.equal(config.timeoutMs, 1500);
+    assert.equal(config.warmup, 3);
+    assert.equal(config.delayMs, 250);
   });
+});
+
+test("endpoint status expectations accept shorthand and object form", async () => {
+  await withConfig(
+    {
+      sites: [
+        {
+          name: "x",
+          baseUrl: "https://x.example",
+          endpoints: {
+            page: { path: "/", expect: 200 },
+            health: { path: "/health", expect: { status: 201 } },
+          },
+        },
+      ],
+    },
+    async (file) => {
+      const config = await loadConfig(file);
+      assert.deepEqual(config.sites[0].endpoints.page.expect, { status: 200 });
+      assert.deepEqual(config.sites[0].endpoints.health.expect, { status: 201 });
+    }
+  );
+});
+
+test("warmup, delayMs and expect are validated", async () => {
+  const cases = [
+    [{ warmup: -1, sites: [{ name: "x", baseUrl: "https://x.example" }] }, /"warmup"/],
+    [{ delayMs: -5, sites: [{ name: "x", baseUrl: "https://x.example" }] }, /"delayMs"/],
+    [
+      {
+        sites: [
+          { name: "x", baseUrl: "https://x.example", endpoints: { page: { path: "/", expect: "200" } } },
+        ],
+      },
+      /must be a status code or an object/,
+    ],
+    [
+      {
+        sites: [
+          { name: "x", baseUrl: "https://x.example", endpoints: { page: { path: "/", expect: { status: 99 } } } },
+        ],
+      },
+      /between 100 and 599/,
+    ],
+  ];
+  for (const [content, expected] of cases) {
+    await withConfig(content, async (file) => {
+      await assert.rejects(() => loadConfig(file), expected);
+    });
+  }
 });
 
 test("invalid configs are rejected with useful messages", async () => {

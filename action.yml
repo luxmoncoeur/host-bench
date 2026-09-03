@@ -1,0 +1,43 @@
+name: "host-bench"
+description: "Benchmark a deployed URL with host-bench — real HTTP timings, optional performance gate"
+branding:
+  icon: "activity"
+  color: "green"
+
+inputs:
+  url:
+    description: "The URL to benchmark"
+    required: true
+  runs:
+    description: "Requests per endpoint"
+    required: false
+    default: "5"
+  warmup:
+    description: "Extra unmeasured requests per endpoint"
+    required: false
+    default: "0"
+  timeout:
+    description: "Per-request timeout in ms"
+    required: false
+    default: "10000"
+  fail-over:
+    description: "Fail the step if any endpoint average exceeds this many ms"
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+    - name: Install host-bench
+      shell: bash
+      run: npm install -g "github:luxmoncoeur/host-bench#${{ github.action_ref || 'main' }}"
+    - name: Benchmark ${{ inputs.url }}
+      shell: bash
+      run: |
+        ARGS="--url '${{ inputs.url }}' --runs ${{ inputs.runs }} --warmup ${{ inputs.warmup }} --timeout ${{ inputs.timeout }} --no-save"
+        if [ -n "${{ inputs.fail-over }}" ]; then
+          ARGS="$ARGS --fail-over ${{ inputs.fail-over }}"
+        fi
+        host-bench run $ARGS

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-const DEFAULTS = { runs: 5, timeoutMs: 10_000 };
+const DEFAULTS = { runs: 5, timeoutMs: 10_000, warmup: 0, delayMs: 0 };
 const HTTP_METHOD_RE = /^[A-Za-z]+$/;
 
 export async function loadConfig(configPath, overrides = {}) {
@@ -29,6 +29,8 @@ export async function loadConfig(configPath, overrides = {}) {
     }
     config.timeoutMs = overrides.timeoutMs;
   }
+  if (overrides.warmup != null) config.warmup = overrides.warmup;
+  if (overrides.delayMs != null) config.delayMs = overrides.delayMs;
   return config;
 }
 
@@ -51,12 +53,16 @@ export function configFromUrl(url, opts = {}) {
   return {
     runs: opts.runs ?? DEFAULTS.runs,
     timeoutMs: opts.timeoutMs ?? DEFAULTS.timeoutMs,
+    warmup: opts.warmup ?? DEFAULTS.warmup,
+    delayMs: opts.delayMs ?? DEFAULTS.delayMs,
     sites: [
       {
         name: opts.name || u.host,
         baseUrl: u.origin,
         headers: {},
-        endpoints: { page: { path: page === "" ? "/" : page, method: "GET", headers: {}, body: null } },
+        endpoints: {
+          page: { path: page === "" ? "/" : page, method: "GET", headers: {}, body: null, expect: null },
+        },
       },
     ],
   };
@@ -72,6 +78,8 @@ function normalize(raw, configPath) {
   return {
     runs: validateInt(raw.runs ?? DEFAULTS.runs, "runs", 1, configPath),
     timeoutMs: validateInt(raw.timeoutMs ?? DEFAULTS.timeoutMs, "timeoutMs", 100, configPath),
+    warmup: validateInt(raw.warmup ?? DEFAULTS.warmup, "warmup", 0, configPath),
+    delayMs: validateInt(raw.delayMs ?? DEFAULTS.delayMs, "delayMs", 0, configPath),
     sites: raw.sites.map(validateSite),
   };
 }
@@ -106,7 +114,7 @@ function validateSite(site, index) {
 
   const clean = {};
   if (endpoints.page == null) {
-    clean.page = { path: "/", method: "GET", headers: {}, body: null }; // page defaults to "/"
+    clean.page = { path: "/", method: "GET", headers: {}, body: null, expect: null }; // page defaults to "/"
   }
   for (const [key, value] of Object.entries(endpoints)) {
     clean[key] = validateEndpoint(value, `${where}.endpoints.${key}`);
@@ -117,7 +125,7 @@ function validateSite(site, index) {
 
 // An endpoint is either a path string or an object with request options:
 //   "api": "/api/health"
-//   "contact": { "path": "/api/contact", "method": "POST", "body": {...}, "headers": {...} }
+//   "contact": { "path": "/api/contact", "method": "POST", "body": {...}, "headers": {...}, "expect": { "status": 200 } }
 // Any number of endpoints with any names is allowed; they become rows in the table.
 function validateEndpoint(value, where) {
   if (typeof value === "string") {
@@ -126,11 +134,11 @@ function validateEndpoint(value, where) {
         `Config ${where} must be a path starting with "/" (got ${JSON.stringify(value)}).`
       );
     }
-    return { path: value, method: "GET", headers: {}, body: null };
+    return { path: value, method: "GET", headers: {}, body: null, expect: null };
   }
 
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    const { path, method = "GET", headers = {}, body = null } = value;
+    const { path, method = "GET", headers = {}, body = null, expect = null } = value;
     if (typeof path !== "string" || !path.startsWith("/")) {
       throw new Error(
         `Config ${where}.path must be a path starting with "/" (got ${JSON.stringify(path)}).`
@@ -144,12 +152,35 @@ function validateEndpoint(value, where) {
     validateHeaders(headers, `${where}.headers`);
     const bodyOut =
       body == null ? null : typeof body === "string" ? body : JSON.stringify(body);
-    return { path, method: method.toUpperCase(), headers: { ...headers }, body: bodyOut };
+    return {
+      path,
+      method: method.toUpperCase(),
+      headers: { ...headers },
+      body: bodyOut,
+      expect: validateExpect(expect, `${where}.expect`),
+    };
   }
 
   throw new Error(
     `Config ${where} must be a path string or an object with a "path" (got ${JSON.stringify(value)}).`
   );
+}
+
+// "expect": 200 (shorthand) or "expect": { "status": 200 } — requests that
+// answer with a different status count as errors.
+function validateExpect(expect, where) {
+  if (expect == null) return null;
+  const obj = typeof expect === "number" ? { status: expect } : expect;
+  if (typeof obj !== "object" || Array.isArray(obj)) {
+    throw new Error(`Config ${where} must be a status code or an object like { "status": 200 }.`);
+  }
+  const { status } = obj;
+  if (!Number.isInteger(status) || status < 100 || status > 599) {
+    throw new Error(
+      `Config ${where}.status must be an integer between 100 and 599 (got ${JSON.stringify(status)}).`
+    );
+  }
+  return { status };
 }
 
 function validateHeaders(headers, where) {

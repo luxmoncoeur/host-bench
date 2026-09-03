@@ -92,7 +92,13 @@ export function buildPayload(results, meta) {
     version: meta.version,
     ranAt: new Date().toISOString(),
     config: meta.configPath,
-    settings: { runs: meta.runs, timeoutMs: meta.timeoutMs },
+    settings: {
+      runs: meta.runs,
+      timeoutMs: meta.timeoutMs,
+      warmup: meta.warmup ?? 0,
+      delayMs: meta.delayMs ?? 0,
+    },
+    ...(meta.gate ? { gate: meta.gate } : {}),
     results,
   };
 }

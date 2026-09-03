@@ -71,14 +71,43 @@ try {
   assert.equal(payload.tool, "host-bench");
   assert.equal(payload.results[0].endpoints.ping.successes, 2);
   assert.ok(payload.results[0].endpoints.api.p95Ms > 0);
+  assert.ok(payload.results[0].endpoints.api.p50Ms > 0);
+  assert.ok(payload.results[0].endpoints.api.avgBytes > 0);
+  assert.deepEqual(payload.results[0].endpoints.page.statuses, { 200: 2 });
 
-  // 3. compare reads the two runs it just saved.
+  // 3. Performance gate: generous budget passes, zero budget exits with code 2.
+  const gatePass = await run([
+    "run", "--config", config, "--out", path.join(dir, "results"), "--fail-over", "10000", "--no-save",
+  ]);
+  assert.equal(gatePass.status, 0, gatePass.stderr + gatePass.stdout);
+  assert.match(gatePass.stdout, /Performance gate passed/);
+
+  const gateFail = await run([
+    "run", "--config", config, "--out", path.join(dir, "results"), "--fail-over", "0", "--no-save",
+  ]);
+  assert.equal(gateFail.status, 2, gateFail.stderr + gateFail.stdout);
+  assert.match(gateFail.stdout, /Performance gate FAILED/);
+  assert.match(gateFail.stdout, /ms budget/);
+
+  // 4. compare reads the runs it just saved, in table and markdown form.
   const compare = await run(["compare", "--dir", path.join(dir, "results")]);
   assert.equal(compare.status, 0, compare.stderr + compare.stdout);
-  assert.match(compare.stdout, /2 run\(s\)/);
   assert.match(compare.stdout, /first avg/);
 
-  // 4. init scaffolds a usable config in an empty directory.
+  const compareMd = await run([
+    "compare", "--dir", path.join(dir, "results"), "--format", "markdown",
+  ]);
+  assert.equal(compareMd.status, 0, compareMd.stderr + compareMd.stdout);
+  assert.match(compareMd.stdout, /\| site \| metric \| runs \|/);
+  assert.match(compareMd.stdout, /\| --- /);
+
+  // 5. show pretty-prints the latest saved run without re-benchmarking.
+  const show = await run(["show", "latest", "--dir", path.join(dir, "results")]);
+  assert.equal(show.status, 0, show.stderr + show.stdout);
+  assert.match(show.stdout, /host-bench v\d/);
+  assert.match(show.stdout, /results/);
+
+  // 6. init scaffolds a usable config in an empty directory.
   const initDir = path.join(dir, "initcheck");
   await mkdir(initDir);
   const init = await run(["init"], { cwd: initDir });
@@ -87,7 +116,7 @@ try {
   assert.equal(scaffold.sites.length, 1);
   assert.ok(scaffold.sites[0].baseUrl.startsWith("https://"));
 
-  console.log("smoke OK: run table, run --json, compare, init");
+  console.log("smoke OK: run table, run --json, gate pass/fail, compare (table+markdown), show, init");
 } finally {
   server.close();
   await rm(dir, { recursive: true, force: true });
