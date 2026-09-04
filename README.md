@@ -2,29 +2,51 @@
 
 [![CI](https://github.com/luxmoncoeur/host-bench/actions/workflows/ci.yml/badge.svg)](https://github.com/luxmoncoeur/host-bench/actions/workflows/ci.yml)
 
-A small CLI that benchmarks hosting providers (Vercel, Railway, Render, Fly.io) for a **dynamic site's** performance, so you can compare how the same app behaves on different hosts — with numbers, not opinions.
+A small CLI tool for testing **website and API performance**.
 
-It hits your deployed site's pages, API routes, and DB-backed routes with real HTTP requests, prints a comparison table (avg / min / max / p95), and saves every run as timestamped JSON so you can track performance over time.
+`host-bench` sends real HTTP requests to your application, measures how long they take, saves the results, and lets you compare them over time.
 
-Requires **Node.js 18+** (uses the built-in `fetch`).
+It can be used to test a local app, staging or production deployment, or compare the same app across hosting providers such as **Vercel, Railway, Render, and Fly.io**.
+
+Requires **Node.js 18+**.
 
 ---
 
 ## Demo
 
-```bash
-# 1. No install, no config: benchmark any URL one-off
-npx host-bench run --url https://your-site.vercel.app
+Test any URL without a config file:
 
-# 2. The out-of-the-box flow: scaffold a working config, then run it
+```bash
+npx host-bench run --url https://your-site.vercel.app
+```
+
+Or use the full config-based flow:
+
+```bash
 host-bench init
 host-bench run
-
-# 3. Every run is saved as JSON — compare them over time
 host-bench compare
 ```
 
-That's the whole product: measure → save → compare. Everything below is the details.
+Example output:
+
+```text
+host-bench v0.3.0 — 1 site(s), 5 run(s) per endpoint
+
+snake  https://slitherin-game.vercel.app
+  page / — avg 62 ms · min 34 · max 169 · p95 169 · 5/5 ok
+
+results
+site   metric  endpoint  avg ms  min ms  max ms  p95 ms  ok
+-----  ------  --------  ------  ------  ------  ------  ---
+snake  page    /         62      34      169     169     5/5
+
+Results saved to results/host-bench-2026-09-02T18-04-43-531Z.json
+```
+
+Every run can be saved and compared later.
+
+**The basic idea: measure → save → compare.**
 
 ---
 
@@ -34,30 +56,45 @@ That's the whole product: measure → save → compare. Everything below is the 
 # global install from npm (once published)
 npm install -g host-bench
 
-# …or run it directly without installing
+# or run it directly without installing
 npx host-bench run
 
-# …or, from a clone of this repo, link it as the global `host-bench` command
+# or, from a clone of this repo
 npm link
 ```
 
 ## Quickstart
 
-**1. Scaffold a config.** `init` writes `host-bench.config.json` with a demo entry (example.com), so your very first run succeeds before you have a site of your own:
+**1. Create a config.**
 
 ```bash
 host-bench init
 ```
 
-**2. Point it at your sites.** Edit `baseUrl` (and add `api` / `db` endpoints if you have them — see [Config file](#config-file)):
+This creates `host-bench.config.json` with an example site.
+
+**2. Add your sites and endpoints.**
 
 ```json
 {
   "runs": 5,
   "timeoutMs": 10000,
   "sites": [
-    { "name": "vercel", "baseUrl": "https://my-app.vercel.app", "endpoints": { "page": "/", "api": "/api/health" } },
-    { "name": "railway", "baseUrl": "https://my-app.up.railway.app", "endpoints": { "page": "/" } }
+    {
+      "name": "vercel",
+      "baseUrl": "https://my-app.vercel.app",
+      "endpoints": {
+        "page": "/",
+        "api": "/api/health"
+      }
+    },
+    {
+      "name": "railway",
+      "baseUrl": "https://my-app.up.railway.app",
+      "endpoints": {
+        "page": "/"
+      }
+    }
   ]
 }
 ```
@@ -68,44 +105,19 @@ host-bench init
 host-bench run
 ```
 
-Real output (benchmarked against a deployed static game, 5 runs):
-
-```
-host-bench v0.3.0 — 1 site(s), 5 run(s) per endpoint, 10000 ms timeout
-
-snake  https://slitherin-game.vercel.app
-  cold / — TTFB 197 ms (status 200)
-  page / — avg 62 ms · min 34 · max 169 · p95 169 · 5/5 ok
-
-results
-site   metric  endpoint  avg ms  min ms  max ms  p95 ms  ok
------  ------  --------  ------  ------  ------  ------  ---
-snake  cold    /         197     -       -       -       1/1
-snake  page    /         62      34      169     169     5/5
-
-avg/min/max/p95 = total response time over N runs; ok = successful/total requests.
-cold = best-effort TTFB estimate of the first request (see Limitations).
-
-Results saved to results/host-bench-2026-09-02T18-04-43-531Z.json
-```
-
-**4. Track it over time.** Every `run` saves a JSON file; `compare` reads them:
+**4. Compare previous runs.**
 
 ```bash
 host-bench compare
 ```
 
+You can also view the latest saved result:
+
+```bash
+host-bench show
 ```
-host-bench compare — 3 run(s) from results/ (oldest → newest)
-site        metric  runs  first avg  latest avg  change           best min
-----------  ------  ----  ---------  ----------  ---------------  --------
-provider-a  api     2     32         28          -4 ms (-13%)     23
-provider-a  cold    2     670        51          -620 ms (-92%)   -
-provider-a  db      2     106        101         -5 ms (-5%)      96
-provider-a  page    2     31         26          -5 ms (-16%)     23
-snake       cold    1     197        197         +0 ms (+0%)      -
-snake       page    1     62         62          +0 ms (+0%)      34
-```
+
+---
 
 ## Usage
 
@@ -117,53 +129,59 @@ host-bench init [options]
 
 host-bench run [options]
 
-  -u, --url <url>       benchmark a single URL one-off, no config file needed
+  -u, --url <url>       benchmark a single URL without a config file
   --name <label>        label for --url mode (defaults to the hostname)
-  -c, --config <path>   path to the config file (default: host-bench.config.json)
+  -c, --config <path>   path to the config file
   -n, --runs <count>    requests per endpoint (default: 5)
-  -t, --timeout <ms>    per-request timeout in ms (default: 10000)
-  --warmup <count>      extra unmeasured requests per endpoint (default: 0)
-  --delay <ms>          delay between requests in ms (default: 0)
-  --fail-over <ms>      performance gate: exit code 2 if any endpoint avg exceeds it
-  -o, --out <dir>       directory for result JSON files (default: results)
-  --json                print results as JSON to stdout instead of a table
-  --no-save             print the table but don't write a results file
+  -t, --timeout <ms>    per-request timeout (default: 10000)
+  --warmup <count>      extra unmeasured requests per endpoint
+  --delay <ms>          delay between requests
+  --fail-over <ms>      fail if an endpoint's average exceeds this value
+  -o, --out <dir>       directory for result JSON files
+  --json                print results as JSON
+  --no-save             print results without saving a file
 
 host-bench compare [options]
 
-  -d, --dir <path>      results directory to read (default: results)
-  -l, --last <count>    only compare the N most recent runs (default: 5)
-  -f, --format <type>   output format: table or markdown (paste-ready)
+  -d, --dir <path>      results directory
+  -l, --last <count>    number of recent runs to compare
+  -f, --format <type>   output format: table or markdown
 
 host-bench show [file] [options]
 
-  [file]                result file name, or "latest" (default)
-  -d, --dir <path>      results directory to read (default: results)
+  [file]                result file name, or "latest"
+  -d, --dir <path>      results directory
 ```
 
-Notes:
+With `--url`, you can quickly test one URL without creating a config:
 
-- With `--url`, the path and query string are benchmarked as the page route (e.g. `--url https://api.example.com/items` times `/items`) and the result is labeled by hostname (override with `--name`).
-- `--json` emits a single JSON document on stdout (the same shape as the saved file) and moves the "saved to" note to stderr, so it's safe to pipe into `jq` or a script.
-- Running without a config in the directory prints a hint pointing at `init` / `--url`.
+```bash
+host-bench run --url https://api.example.com/items
+```
+
+`--json` outputs the results as JSON, making them easy to use with other tools.
+
+---
 
 ## What it measures
 
-For every configured site:
+For each configured endpoint, `host-bench` records response timing and request results.
 
-| Metric | What it does |
-| --- | --- |
-| **cold** | Time to first byte (TTFB) of the very first request to the page route — a best-effort cold-start estimate. |
-| **page** | N requests to your main page route; reports avg / min / max / p95 response time. |
-| **api** | Same, against a configured API endpoint (e.g. `/api/health`). |
-| **db** | Same, against a configured DB-backed endpoint (e.g. `/api/items`). Optional per site. |
-| **anything else** | Any number of custom named endpoints — see the config docs. |
+| Metric               | What it does                          |
+| -------------------- | ------------------------------------- |
+| **cold**             | Measures the first request separately |
+| **page**             | Tests the main page                   |
+| **api**              | Tests a configured API endpoint       |
+| **db**               | Tests a DB-backed endpoint            |
+| **custom endpoints** | Test any other endpoint you configure |
 
-Endpoints aren't limited to GET: each one can send a custom method, headers, and a JSON body, so you can benchmark protected or write routes (with a caveat — see the security note below).
+Each endpoint can use a custom HTTP method, headers, and JSON body, so you can also test protected or write routes.
+
+---
 
 ## Config file
 
-`host-bench` reads `host-bench.config.json` from the current directory (or pass `--config <path>`):
+`host-bench` reads `host-bench.config.json` by default.
 
 ```json
 {
@@ -181,7 +199,9 @@ Endpoints aren't limited to GET: each one can send a custom method, headers, and
     {
       "name": "railway",
       "baseUrl": "https://my-app-production.up.railway.app",
-      "headers": { "authorization": "Bearer <token>" },
+      "headers": {
+        "authorization": "Bearer <token>"
+      },
       "endpoints": {
         "page": "/",
         "api": "/api/health",
@@ -189,15 +209,15 @@ Endpoints aren't limited to GET: each one can send a custom method, headers, and
         "contact": {
           "path": "/api/contact",
           "method": "POST",
-          "headers": { "x-api-key": "<key>" },
-          "body": { "name": "host-bench", "message": "health check" }
+          "headers": {
+            "x-api-key": "<key>"
+          },
+          "body": {
+            "name": "host-bench",
+            "message": "health check"
+          }
         }
       }
-    },
-    {
-      "name": "render",
-      "baseUrl": "https://my-app.onrender.com",
-      "endpoints": { "page": "/" }
     }
   ]
 }
@@ -205,60 +225,114 @@ Endpoints aren't limited to GET: each one can send a custom method, headers, and
 
 ### Top-level keys
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `runs` | `5` | How many times each endpoint is requested (measured). |
-| `timeoutMs` | `10000` | Per-request timeout. |
-| `warmup` | `0` | Extra unmeasured requests per endpoint, discarded before counting. |
-| `delayMs` | `0` | Pause between requests, for more realistic pacing. |
-| `sites` | required | One entry per deployment to benchmark. |
+| Key         | Default  | Meaning                         |
+| ----------- | -------- | ------------------------------- |
+| `runs`      | `5`      | Number of requests per endpoint |
+| `timeoutMs` | `10000`  | Request timeout                 |
+| `warmup`    | `0`      | Extra requests before measuring |
+| `delayMs`   | `0`      | Delay between requests          |
+| `sites`     | required | Sites to benchmark              |
 
 ### Per-site keys
 
-| Key | Required | Meaning |
-| --- | --- | --- |
-| `name` | yes | Label shown in the table and JSON. |
-| `baseUrl` | yes | Root URL (`http://` or `https://`); trailing slashes are trimmed. |
-| `headers` | no | Headers sent with **every** request to this site (e.g. an auth token). |
-| `endpoints` | no | Object of named endpoints; `page` defaults to `/` when omitted. |
+| Key         | Required | Meaning                         |
+| ----------- | -------- | ------------------------------- |
+| `name`      | yes      | Name shown in results           |
+| `baseUrl`   | yes      | Website or API URL              |
+| `headers`   | no       | Headers sent with every request |
+| `endpoints` | no       | Endpoints to test               |
 
 ### Endpoints
 
-An endpoint value is either:
+An endpoint can be a simple path:
 
-- **a path string** (GET request): `"api": "/api/health"`, or
-- **an object with request options**: `{ "path": "/api/contact", "method": "POST", "headers": {...}, "body": {...}, "expect": { "status": 200 } }`
-  - `method` — any HTTP verb, defaults to `GET`
-  - `headers` — merged over the site-level headers
-  - `body` — a JSON value (stringified automatically, with `content-type: application/json` applied unless you set your own) or a pre-encoded string
-  - `expect` — optional status assertion (`200` shorthand or `{ "status": 200 }`); responses with a different status count as errors, which turns host-bench into a health check
+```json
+"api": "/api/health"
+```
 
-**Any number of endpoints with any names is allowed** — each key becomes its own row in the table and its own series in the JSON.
+or a full request configuration:
 
-> **Security note:** the config file can carry auth tokens, so don't commit real ones. Keep secrets in a local-only file (e.g. `host-bench.local.json` passed via `--config`) or inject them some other way.
+```json
+"contact": {
+  "path": "/api/contact",
+  "method": "POST",
+  "headers": {
+    "x-api-key": "<key>"
+  },
+  "body": {
+    "name": "host-bench",
+    "message": "health check"
+  },
+  "expect": {
+    "status": 200
+  }
+}
+```
+
+You can use any endpoint name and configure its method, headers, body, and expected status.
+
+> **Security:** config files can contain API keys or authentication tokens. Don't commit real secrets. Use a local config file such as `host-bench.local.json` when needed.
+
+---
 
 ## Tracking results over time
 
-Each `run` writes `results/host-bench-<timestamp>.json` containing the tool version, timestamp, the config used, the run settings (runs / timeout / warmup / delay), an optional `gate` verdict, and per-endpoint series: `avgMs`, `minMs`, `maxMs`, `p50Ms`, `p95Ms`, `p99Ms`, `avgTtfbMs`, `avgBytes`, connection stats (`avgConnectMs`, `newConnections`, `reusedRequests`), a `statuses` histogram (e.g. `{"200": 5}`), success/error counts, URLs, methods, and the last error if any. One file per run, human-readable, diff-friendly.
-
-`host-bench compare` aggregates those files: per site/metric it shows how many runs saw it, the first and latest average, the change between them (ms and %), and the best min seen. With `--format markdown` it prints a GitHub-flavored table you can paste straight into a README or issue. It reads both the current and the pre-0.3.0 result format, and it's the text-mode predecessor to a dashboard — the JSON files are the data layer a dashboard would use.
-
-`host-bench show` re-displays any saved run (or `latest`) without re-benchmarking:
+Each `run` saves a JSON result in the `results/` directory.
 
 ```bash
-host-bench show                    # latest run in results/
+host-bench run
+```
+
+Example:
+
+```text
+results/
+└── host-bench-2026-09-02T18-04-43-531Z.json
+```
+
+Use `compare` to see how results changed:
+
+```bash
+host-bench compare
+```
+
+Example:
+
+```text
+host-bench compare — 3 run(s) from results/ (oldest → newest)
+
+site        metric  runs  first avg  latest avg  change
+----------  ------  ----  ---------  ----------  ---------------
+provider-a  api     2     32         28          -4 ms (-13%)
+provider-a  db      2     106        101         -5 ms (-5%)
+provider-a  page    2     31         26          -5 ms (-16%)
+```
+
+The saved JSON files can also be used as the data source for future tools such as a dashboard.
+
+`show` displays a saved result without running another benchmark:
+
+```bash
+host-bench show
 host-bench show host-bench-2026-09-02T18-04-43-531Z.json
 ```
 
+---
+
 ## Use in your own CI
 
-`host-bench` doubles as a performance gate. `--fail-over <ms>` exits with code **2** when any endpoint's average exceeds the budget (or when an endpoint fails entirely), which makes regressions visible right in your build:
+`host-bench` can act as a simple performance check.
 
 ```bash
-host-bench run --url https://my-site.vercel.app --fail-over 300 --no-save
+host-bench run \
+  --url https://my-site.vercel.app \
+  --fail-over 300 \
+  --no-save
 ```
 
-Or use the composite GitHub Action shipped in this repo (`action.yml`) in another repository's workflow:
+If the average response time goes above the limit, the command fails.
+
+You can also use the included GitHub Action:
 
 ```yaml
 - name: Performance check
@@ -269,54 +343,83 @@ Or use the composite GitHub Action shipped in this repo (`action.yml`) in anothe
     fail-over: 300
 ```
 
+---
+
 ## How it works
 
-- **TTFB vs total** — every request records two timings: TTFB (request sent → response headers arrive) and total (→ body fully drained). The table and the `avgMs`/`minMs`/`maxMs`/`p50Ms`/`p95Ms`/`p99Ms` fields are **total** response times; `avgTtfbMs` is stored alongside.
-- **Connection attribution** — host-bench taps undici's diagnostics channels to tell a **new connection** (DNS + TCP + TLS, reported as `avgConnectMs`) from a **reused** one (`reusedRequests`). Requests run sequentially, so attribution is exact; the first request in a run typically pays the connection cost and the rest reuse the socket.
-- **Cold start** — the very first request of a run is measured separately as the cold probe. Providers don't expose "is my instance asleep?" over HTTP, so this is a *best-effort estimate*: if the host never spun your app down, it's just a warm request. The probe doubles as warm-up, and the `warmup` option adds more unmeasured requests per endpoint. For a realistic cold-start reading, wait out your platform's idle timeout (often 10–15 min) first.
-- **p50/p95/p99** — computed with the nearest-rank method on the N total-time samples (with 5 runs, p95 ≈ the max; with 20 runs it's the 19th fastest).
-- **Sequential, not concurrent** — endpoints are hit one request at a time (optionally spaced with `delayMs`) to keep load light on the target. This measures latency, not capacity — it is not a load test.
-- **Client-side timing** — all numbers include your network. Compare hosts only from the same machine/network, and treat localhost numbers as a no-network baseline for your app itself, not a comparison point.
+`host-bench` sends real HTTP requests to your configured endpoints and records their response times.
+
+Each request records both TTFB and total response time. The main `avg`, `min`, `max`, `p50`, `p95`, and `p99` results use total response time.
+
+The first request is also recorded as a `cold` measurement. This is a best-effort estimate and does not guarantee that a hosting provider actually started a sleeping instance.
+
+Requests are sent sequentially to keep the benchmark lightweight.
+
+All measurements are taken from the machine running `host-bench`, so your network can affect the results. For hosting comparisons, use the same machine and network.
+
+---
 
 ## Limitations
 
-- **Cold start is a best-effort estimate** (see above) — you may just be measuring a warm first request.
-- **Numbers are client-side** — DNS, TLS, and your connection are in every measurement.
-- **No per-request DNS/TLS breakdown** — connection costs are absorbed by the warm-up and connection reuse, not attributed.
-- **Not a load test** — sequential requests only.
+- Cold-start measurements are best-effort.
+- Results are affected by the network running the benchmark.
+- Connection setup is included in the measurements.
+- Requests are sequential.
+- `host-bench` is a performance benchmark, **not a load-testing tool**.
+
+---
 
 ## Development
 
 ```bash
 npm install
-npm run lint     # syntax-check every source file
-npm test         # unit + integration tests (node:test, zero test-framework deps)
-npm run smoke    # end-to-end: real CLI against a throwaway local server
+npm run lint
+npm test
+npm run smoke
 ```
 
-CI (`.github/workflows/ci.yml`) runs all three on every push and PR across Node 18/20/22/24. Tagging a commit `v*` triggers `.github/workflows/release.yml`, which re-tests and publishes to npm (requires an `NPM_TOKEN` repo secret) and creates the GitHub release. Dependabot (`.github/dependabot.yml`) keeps dependencies and Actions fresh weekly.
+CI runs lint, unit/integration tests, and the smoke test across Node 18/20/22/24.
 
-Release flow: bump `version` in `package.json` → commit → `git tag vX.Y.Z && git push --tags`.
+Tagging a commit with `v*` triggers the release workflow, which tests and publishes the package to npm.
+
+Dependabot keeps dependencies and GitHub Actions updated weekly.
+
+### Release
+
+1. Update `version` in `package.json`
+2. Commit the change
+3. Create a tag:
+
+```bash
+git tag vX.Y.Z
+git push --tags
+```
+
+---
 
 ## Project layout
 
-```
-bin/host-bench.js     CLI entry point (commander)
-src/config.js         config loading + validation, --url config synthesis
-src/init.js           `init` command (config scaffolding)
-src/benchmark.js      HTTP timing logic (method/headers/body, cold probe, series)
-src/stats.js          mean / nearest-rank percentile helpers
-src/report.js         table rendering + timestamped JSON output
-src/compare.js        `compare` command (trend across saved runs)
-src/show.js           `show` command (re-display a saved run)
-src/run.js            `run` command wiring + performance gate
-scripts/smoke.mjs     end-to-end smoke test used by CI
-tests/                unit + integration tests (node:test)
-action.yml            composite GitHub Action for other repos' workflows
+```text
+bin/host-bench.js     CLI entry point
+src/config.js         config loading + validation
+src/init.js           config scaffolding
+src/benchmark.js      HTTP benchmarking
+src/stats.js          statistics
+src/report.js         result output
+src/compare.js        result comparison
+src/show.js            saved result display
+src/run.js             run command + performance gate
+scripts/smoke.mjs     end-to-end smoke test
+tests/                unit + integration tests
+action.yml            GitHub Action
 host-bench.config.json
-results/              timestamped run output (gitignored)
+results/              timestamped results (gitignored)
 ```
+
+---
 
 ## Roadmap
 
-- [ ] Dashboard / trend charts over stored results (the `compare` command + JSON files are the data layer)
+- [ ] Dashboard / trend charts over stored results
+
+The existing `compare` command and saved JSON results provide the data for a future dashboard.
