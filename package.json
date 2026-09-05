@@ -1,6 +1,6 @@
 {
   "name": "host-bench",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "CLI to benchmark hosting providers (Vercel, Railway, Render, Fly.io) for a dynamic site's performance.",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
   "scripts": {
     "host-bench": "node bin/host-bench.js",
     "bench": "node bin/host-bench.js run",
-    "lint": "for f in bin/*.js src/*.js tests/*.js scripts/*.mjs; do node --check \"$f\" || exit 1; done",
+    "lint": "node scripts/lint.js",
     "test": "node --test tests/*.test.js",
     "smoke": "node scripts/smoke.mjs"
   },

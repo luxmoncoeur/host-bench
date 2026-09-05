@@ -28,6 +28,12 @@ host-bench run
 host-bench compare
 ```
 
+Testing a local dev server? `run --local` finds it automatically on the usual ports (3000, 5173, 8080, …):
+
+```bash
+host-bench run --local
+```
+
 Example output:
 
 ```text
@@ -72,6 +78,14 @@ host-bench init
 ```
 
 This creates `host-bench.config.json` with an example site.
+
+Prefer answering questions over editing JSON? Use the interactive mode:
+
+```bash
+host-bench init -i
+```
+
+It asks for the site URL, the routes to test, and how many requests to send — then writes the config for you.
 
 **2. Add your sites and endpoints.**
 
@@ -124,12 +138,14 @@ host-bench show
 ```bash
 host-bench init [options]
 
+  -i, --interactive     create the config by answering a few questions
   -o, --out <path>      where to write the config (default: host-bench.config.json)
   -f, --force           overwrite the config if it already exists
 
 host-bench run [options]
 
   -u, --url <url>       benchmark a single URL without a config file
+  --local               find dev servers on common localhost ports and benchmark them
   --name <label>        label for --url mode (defaults to the hostname)
   -c, --config <path>   path to the config file
   -n, --runs <count>    requests per endpoint (default: 5)
@@ -151,6 +167,11 @@ host-bench show [file] [options]
 
   [file]                result file name, or "latest"
   -d, --dir <path>      results directory
+
+host-bench doctor [options]
+
+  -c, --config <path>   config file to validate (default: host-bench.config.json)
+  -o, --out <dir>       results directory to check (default: results)
 ```
 
 With `--url`, you can quickly test one URL without creating a config:
@@ -160,6 +181,18 @@ host-bench run --url https://api.example.com/items
 ```
 
 `--json` outputs the results as JSON, making them easy to use with other tools.
+
+---
+
+## Troubleshooting
+
+Something not working? `doctor` checks the usual suspects and explains what to fix in plain words:
+
+```bash
+host-bench doctor
+```
+
+It checks your Node version, internet connection, config file, and that results can be saved. Warnings (like being offline) don't stop you from benchmarking localhost targets.
 
 ---
 
@@ -378,7 +411,7 @@ npm test
 npm run smoke
 ```
 
-CI runs lint, unit/integration tests, and the smoke test across Node 18/20/22/24.
+CI runs lint, unit/integration tests, and the smoke test on Ubuntu and Windows across Node 18/20/22/24.
 
 Tagging a commit with `v*` triggers the release workflow, which tests and publishes the package to npm.
 
@@ -402,13 +435,16 @@ git push --tags
 ```text
 bin/host-bench.js     CLI entry point
 src/config.js         config loading + validation
-src/init.js           config scaffolding
+src/init.js           config scaffolding (plain + interactive)
+src/local.js          localhost dev-server discovery for run --local
+src/doctor.js         environment checks for host-bench doctor
 src/benchmark.js      HTTP benchmarking
 src/stats.js          statistics
 src/report.js         result output
 src/compare.js        result comparison
 src/show.js            saved result display
 src/run.js             run command + performance gate
+scripts/lint.js        cross-platform syntax check
 scripts/smoke.mjs     end-to-end smoke test
 tests/                unit + integration tests
 action.yml            GitHub Action
