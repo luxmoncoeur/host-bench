@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { loadConfig, configFromUrl } from "./config.js";
+import { discoverLocalServers, configFromDiscovered, DEV_PORTS } from "./local.js";
 import { benchmarkSite } from "./benchmark.js";
 import { printProgressHeader, printTable, saveResults, buildPayload } from "./report.js";
 
@@ -7,22 +8,56 @@ const require = createRequire(import.meta.url);
 const { version } = require("../package.json");
 
 export async function runCommand(opts) {
-  const config = opts.url
-    ? configFromUrl(opts.url, {
-        runs: opts.runs,
-        timeoutMs: opts.timeout,
-        warmup: opts.warmup,
-        delayMs: opts.delay,
-        name: opts.name,
-      })
-    : await loadConfig(opts.config, {
-        runs: opts.runs,
-        timeoutMs: opts.timeout,
-        warmup: opts.warmup,
-        delayMs: opts.delay,
-      });
-
   const json = opts.json === true;
+  let config;
+
+  if (opts.local) {
+    if (!json) console.log("Scanning common dev ports (3000, 5173, 8080, …)…");
+    const found = await discoverLocalServers();
+    if (found.length === 0) {
+      throw new Error(
+        `No dev server answered on the usual ports (${DEV_PORTS.join(", ")}). ` +
+          `Start your app first and try again — or point at an exact URL with --url. ` +
+          `(Tip: \`host-bench doctor\` checks your setup.)`
+      );
+    }
+    if (!json) {
+      console.log(
+        `Found ${found.length} server(s): ${found.map((f) => `localhost:${f.port} (status ${f.status})`).join(", ")}\n`
+      );
+    }
+    config = configFromDiscovered(found, {
+      runs: opts.runs,
+      timeoutMs: opts.timeout,
+      warmup: opts.warmup,
+      delayMs: opts.delay,
+    });
+  } else if (opts.url) {
+    config = configFromUrl(opts.url, {
+      runs: opts.runs,
+      timeoutMs: opts.timeout,
+      warmup: opts.warmup,
+      delayMs: opts.delay,
+      name: opts.name,
+    });
+  } else {
+    config = await loadConfig(opts.config, {
+      runs: opts.runs,
+      timeoutMs: opts.timeout,
+      warmup: opts.warmup,
+      delayMs: opts.delay,
+    });
+  }
+
+  const meta = {
+    version,
+    configPath: opts.local ? "--local" : opts.url ? `--url ${opts.url}` : opts.config,
+    runs: config.runs,
+    timeoutMs: config.timeoutMs,
+    warmup: config.warmup,
+    delayMs: config.delayMs,
+  };
+
   if (!json) {
     console.log(
       `host-bench v${version} — ${config.sites.length} site(s), ` +
@@ -40,24 +75,14 @@ export async function runCommand(opts) {
 
   const gate = opts.failOver != null ? evaluateGate(results, opts.failOver) : null;
 
-  const meta = {
-    version,
-    configPath: opts.url ? `--url ${opts.url}` : opts.config,
-    runs: config.runs,
-    timeoutMs: config.timeoutMs,
-    warmup: config.warmup,
-    delayMs: config.delayMs,
-    gate,
-  };
-
   if (json) {
-    console.log(JSON.stringify(buildPayload(results, meta), null, 2));
+    console.log(JSON.stringify(buildPayload(results, { ...meta, gate }), null, 2));
   } else {
     printTable(results);
   }
 
   if (opts.save) {
-    const file = await saveResults(results, opts.out, meta);
+    const file = await saveResults(results, opts.out, { ...meta, gate });
     (json ? console.error : console.log)(`\nResults saved to ${file}`);
   } else if (!json) {
     console.log("\nResults not saved (--no-save).");

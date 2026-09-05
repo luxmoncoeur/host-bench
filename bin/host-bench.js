@@ -6,6 +6,7 @@ import { runCommand } from "../src/run.js";
 import { initCommand } from "../src/init.js";
 import { compareCommand } from "../src/compare.js";
 import { showCommand } from "../src/show.js";
+import { doctorCommand } from "../src/doctor.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -37,6 +38,7 @@ program
   .description(
     "Create a starter host-bench.config.json in the current directory (with a working demo entry)"
   )
+  .option("-i, --interactive", "create the config by answering a few questions instead of editing JSON")
   .option("-o, --out <path>", "where to write the config file", "host-bench.config.json")
   .option("-f, --force", "overwrite the config file if it already exists")
   .action(initCommand);
@@ -47,6 +49,7 @@ program
     "Run every benchmark in the config file, print a results table, and save the raw numbers as JSON"
   )
   .option("-u, --url <url>", "benchmark a single URL one-off, no config file needed")
+  .option("--local", "find dev servers on common localhost ports and benchmark them")
   .option("--name <label>", "label for --url mode (defaults to the hostname)")
   .option("-c, --config <path>", "path to the config file", "host-bench.config.json")
   .option("-n, --runs <count>", "number of requests per endpoint (overrides the config file)", positiveInt)
@@ -75,6 +78,13 @@ program
   .argument("[file]", "result file name, or 'latest'", "latest")
   .option("-d, --dir <path>", "results directory to read", "results")
   .action(showCommand);
+
+program
+  .command("doctor")
+  .description("Check your environment is ready to benchmark and explain anything that isn't")
+  .option("-c, --config <path>", "config file to validate", "host-bench.config.json")
+  .option("-o, --out <dir>", "results directory to check", "results")
+  .action(doctorCommand);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(`error: ${err.message}`);

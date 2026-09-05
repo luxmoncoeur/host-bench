@@ -107,7 +107,14 @@ try {
   assert.match(show.stdout, /host-bench v\d/);
   assert.match(show.stdout, /results/);
 
-  // 6. init scaffolds a usable config in an empty directory.
+  // 6. doctor passes in a working environment (the offline notice is allowed).
+  const doctor = await run(["doctor", "--config", config, "--out", path.join(dir, "results")]);
+  assert.equal(doctor.status, 0, doctor.stderr + doctor.stdout);
+  assert.match(doctor.stdout, /Node\.js version/);
+  assert.match(doctor.stdout, /Config file/);
+  assert.match(doctor.stdout, /Results directory/);
+
+  // 7. init scaffolds a usable config in an empty directory.
   const initDir = path.join(dir, "initcheck");
   await mkdir(initDir);
   const init = await run(["init"], { cwd: initDir });
@@ -116,7 +123,7 @@ try {
   assert.equal(scaffold.sites.length, 1);
   assert.ok(scaffold.sites[0].baseUrl.startsWith("https://"));
 
-  console.log("smoke OK: run table, run --json, gate pass/fail, compare (table+markdown), show, init");
+  console.log("smoke OK: run table, run --json, gate pass/fail, compare (table+markdown), show, doctor, init");
 } finally {
   server.close();
   await rm(dir, { recursive: true, force: true });
